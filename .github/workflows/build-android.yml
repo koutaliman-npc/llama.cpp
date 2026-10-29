@@ -64,11 +64,14 @@ jobs:
             -DGGML_OPENMP=OFF \
             -DGGML_LLAMAFILE=OFF \
             -DLLAMA_CURL=OFF \
-            -DCMAKE_C_FLAGS="-march=armv8-a -fno-vectorize -O3" \
-            -DCMAKE_CXX_FLAGS="-march=armv8-a -fno-vectorize -O3" \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_BUILD_COMMON=ON \
             -DLLAMA_BUILD_SERVER=OFF \
             -DLLAMA_BUILD_EXAMPLES=OFF \
-            -DLLAMA_BUILD_TESTS=OFF
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_APP=OFF \
+            -DCMAKE_C_FLAGS="-march=armv8-a -fno-vectorize -O3" \
+            -DCMAKE_CXX_FLAGS="-march=armv8-a -fno-vectorize -O3"
 
       - name: Build (static)
         run: |
@@ -145,11 +148,14 @@ jobs:
             -DGGML_OPENMP=OFF \
             -DGGML_LLAMAFILE=OFF \
             -DLLAMA_CURL=OFF \
-            -DCMAKE_C_FLAGS="-march=armv8-a -fno-vectorize -O3" \
-            -DCMAKE_CXX_FLAGS="-march=armv8-a -fno-vectorize -O3" \
+            -DLLAMA_BUILD_TOOLS=ON \
+            -DLLAMA_BUILD_COMMON=ON \
             -DLLAMA_BUILD_SERVER=OFF \
             -DLLAMA_BUILD_EXAMPLES=OFF \
-            -DLLAMA_BUILD_TESTS=OFF
+            -DLLAMA_BUILD_TESTS=OFF \
+            -DLLAMA_BUILD_APP=OFF \
+            -DCMAKE_C_FLAGS="-march=armv8-a -fno-vectorize -O3" \
+            -DCMAKE_CXX_FLAGS="-march=armv8-a -fno-vectorize -O3"
 
       - name: Build llama-cli only
         run: |
