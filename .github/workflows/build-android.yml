@@ -2,156 +2,143 @@ name: CI (android)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-    paths:
-      - '.github/workflows/build-android.yml'
-      - '**/CMakeLists.txt'
-      - '**/.cmake'
-      - '**/*.h'
-      - '**/*.hpp'
-      - '**/*.c'
-      - '**/*.cpp'
-
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - '.github/workflows/build-android.yml'
-      - 'examples/llama.android/**'
-
-cache-mode: none
-permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
-  cancel-in-progress: true
-
-env:
-  GGML_NLOOP: 3
-  GGML_N_THREADS: 1
-  LLAMA_ARG_LOG_COLORS: 1
-  LLAMA_ARG_LOG_PREFIX: 1
-  LLAMA_ARG_LOG_TIMESTAMPS: 1
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'sdm670-static'
+        type: choice
+        options:
+          - sdm670-static
+          - sdm670-static-minimal
+      version_tag:
+        description: 'Version tag for artifacts'
+        required: false
+        default: ''
+        type: string
 
 jobs:
-  default:
-    runs-on: ubuntu-24.04  # previously ubuntu-latest
-
+  sdm670-static:
+    name: SDM670 Static (ARMv8.0 baseline, NO dotprod/i8mm/fp16-arith)
+    if: github.event.inputs.build_type == 'sdm670-static' || github.event.inputs.build_type == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - name: Clone
-        uses: actions/checkout@v6
+      - name: Checkout llama.cpp
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          lfs: false
+          repository: ggml-org/llama.cpp
+          ref: master
+          submodules: recursive
 
-      - name: Set up JDK
-        uses: actions/setup-java@v5
+      - name: Setup Android SDK + NDK
+        uses: android-actions/setup-android@v3
         with:
-          java-version: 17
-          distribution: zulu
+          api-level: 30
+          ndk-version: r27c
+          cmdline-tools-version: latest
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
-        with:
-          log-accepted-android-sdk-licenses: false
-
-      - name: Build
+      - name: Configure CMake (ARMv8.0 baseline - SAFE for Cortex-A75)
         run: |
-          cd examples/llama.android
-          ./gradlew build --no-daemon
-
-  ndk:
-    runs-on: ubuntu-24.04  # previously ubuntu-latest
-    container:
-      image: 'ghcr.io/snapdragon-toolchain/arm64-android:v0.3'
-    defaults:
-      run:
-        shell: bash
-
-    permissions:
-      actions: write
-      contents: read
-
-    steps:
-      - name: Clone
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          lfs: false
-
-      - name: Dependencies
-        run: |
-          apt-get update
-          apt-get install -y build-essential
-
-      - name: Build
-        id: ndk_build
-        run: |
-          cmake -D ANDROID_ABI=arm64-v8a -D ANDROID_PLATFORM=android-31 -D CMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake -D GGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.5-a+fp16+i8mm -G Ninja -D LLAMA_OPENSSL=OFF -D GGML_OPENMP=OFF -B build
-          cmake --build build
-          cmake --install build --prefix pkg-adb/llama.cpp
-
-      - name: Upload Android Build Artifact
-        if: ${{ always() && steps.ndk_build.outcome == 'success' }}
-        uses: actions/upload-artifact@v6
-        with:
-          name: llama-cpp-android-arm64-cpu
-          path: pkg-adb/llama.cpp
-
-  arm64:
-    runs-on: ubuntu-24.04  # previously ubuntu-latest
-
-    env:
-      NDK_VERSION: "29.0.14206865"
-
-    steps:
-      - name: Clone
-        id: checkout
-        uses: actions/checkout@v6
-
-      # note : disabled to spare some cache space (https://github.com/ggml-org/llama.cpp/pull/23789)
-      #        for some reason, the ccache does not improve the build time in this case
-      # example:
-      #   cache off: https://github.com/ggerganov/tmp2/actions/runs/26534713799/job/78160400831
-      #   cache on:  https://github.com/ggerganov/tmp2/actions/runs/26534713799/job/78224189394
-      #
-      #- name: ccache
-      #  uses: ggml-org/ccache-action@v1.2.24
-      #  with:
-      #    key: android-ubuntu-arm64
-      #    evict-old-files: 1d
-      #    save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
-
-      - name: Set up JDK
-        uses: actions/setup-java@v5
-        with:
-          java-version: 17
-          distribution: temurin
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
-        with:
-          log-accepted-android-sdk-licenses: false
-
-      - name: Install NDK
-        run: |
-          sdkmanager "ndk;${{ env.NDK_VERSION }}"
-          echo "ANDROID_NDK=${ANDROID_SDK_ROOT}/ndk/${{ env.NDK_VERSION }}" >> $GITHUB_ENV
-
-      - name: Build
-        id: cmake_build
-        run: |
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK}/build/cmake/android.toolchain.cmake \
+          cmake -B build-android \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-28 \
-            -DLLAMA_FATAL_WARNINGS=ON \
-            -DGGML_BACKEND_DL=ON \
-            -DGGML_NATIVE=OFF \
-            -DGGML_CPU_ALL_VARIANTS=ON \
+            -DANDROID_PLATFORM=android-30 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_CPU_AARCH64=OFF \
+            -DGGML_CPU_ALL_VARIANTS=OFF \
+            -DGGML_KLEIDIAI=OFF \
             -DGGML_OPENMP=OFF \
-            -DLLAMA_BUILD_BORINGSSL=ON \
-            -DGGML_RPC=ON
-          time cmake --build build --config Release -j $(nproc)
+            -DGGML_LLAMAFILE=OFF \
+            -DLLAMA_CURL=OFF \
+            -DCMAKE_C_FLAGS="-march=armv8-a -fno-vectorize -O3" \
+            -DCMAKE_CXX_FLAGS="-march=armv8-a -fno-vectorize -O3" \
+            -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_TESTS=OFF
+
+      - name: Build (static)
+        run: |
+          cmake --build build-android --config Release --target llama-cli llama-bench -j$(nproc)
+
+      - name: Verify no illegal instructions (objdump)
+        run: |
+          apt-get update -qq && apt-get install -y -qq binutils-aarch64-linux-gnu >/dev/null
+          echo "=== Checking for SDOT/UDOT (need asimddp) ==="
+          aarch64-linux-gnu-objdump -d build-android/bin/llama-cli | grep -cE '\b(sdot|udot|sdotp|udotp)\b' && { echo "FAIL: dotprod instructions found"; exit 1; } || echo "PASS: no dotprod"
+          echo "=== Checking for SMMLA/UMMLA (need i8mm) ==="
+          aarch64-linux-gnu-objdump -d build-android/bin/llama-cli | grep -cE '\b(smmla|ummla|usmmla|smmlal|usmmlal)\b' && { echo "FAIL: i8mm instructions found"; exit 1; } || echo "PASS: no i8mm"
+          echo "=== Checking for FMLA .h (need asimdfp) ==="
+          aarch64-linux-gnu-objdump -d build-android/bin/llama-cli | grep -cE 'fmla\s+v[0-9]+\.[0-9]+h' && { echo "FAIL: fp16 arithmetic found"; exit 1; } || echo "PASS: no fp16 arithmetic"
+
+      - name: Package static binaries + libs
+        run: |
+          mkdir -p out-static
+          cp build-android/bin/llama-cli build-android/bin/llama-bench out-static/
+          for lib in libggml.so libggml-base.so libggml-cpu.so libllama.so; do
+            find build-android -name "$lib" -exec cp {} out-static/ \;
+          done
+          tar -czf llama-android-arm64-sdm670-safe.tar.gz -C out-static .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-android-arm64-sdm670-safe
+          path: llama-android-arm64-sdm670-safe.tar.gz
+          retention-days: 30
+
+  sdm670-static-minimal:
+    name: SDM670 Static Minimal (llama-cli only, no libs)
+    if: github.event.inputs.build_type == 'sdm670-static-minimal'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout llama.cpp
+        uses: actions/checkout@v4
+        with:
+          repository: ggml-org/llama.cpp
+          ref: master
+          submodules: recursive
+
+      - name: Setup Android SDK + NDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 30
+          ndk-version: r27c
+          cmdline-tools-version: latest
+
+      - name: Configure CMake (ARMv8.0 baseline)
+        run: |
+          cmake -B build-android \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-30 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_CPU_AARCH64=OFF \
+            -DGGML_CPU_ALL_VARIANTS=OFF \
+            -DGGML_KLEIDIAI=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_LLAMAFILE=OFF \
+            -DLLAMA_CURL=OFF \
+            -DCMAKE_C_FLAGS="-march=armv8-a -fno-vectorize -O3" \
+            -DCMAKE_CXX_FLAGS="-march=armv8-a -fno-vectorize -O3" \
+            -DLLAMA_BUILD_SERVER=OFF \
+            -DLLAMA_BUILD_EXAMPLES=OFF \
+            -DLLAMA_BUILD_TESTS=OFF
+
+      - name: Build llama-cli only
+        run: cmake --build build-android --config Release --target llama-cli -j$(nproc)
+
+      - name: Verify no illegal instructions
+        run: |
+          apt-get update -qq && apt-get install -y -qq binutils-aarch64-linux-gnu >/dev/null
+          aarch64-linux-gnu-objdump -d build-android/bin/llama-cli | grep -cE '\b(sdot|udot|sdotp|udotp|smmla|ummla|usmmla|fmla\s+v[0-9]+\.[0-9]+h)\b' && { echo "FAIL: illegal instructions"; exit 1; } || echo "PASS"
+
+      - name: Upload llama-cli
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-cli-android-arm64-sdm670-safe
+          path: build-android/bin/llama-cli
+          retention-days: 30
