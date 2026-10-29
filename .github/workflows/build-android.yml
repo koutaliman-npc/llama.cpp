@@ -31,15 +31,27 @@ jobs:
           ref: master
           submodules: recursive
 
-      - name: Setup Android SDK + NDK
-        uses: android-actions/setup-android@v3
-        with:
-          api-level: 30
-          ndk-version: r27c
-          cmdline-tools-version: latest
+      - name: Install Android SDK + NDK (manual, avoids broken 'tools' package)
+        run: |
+          # Install SDK command line tools
+          SDK_VERSION=11076708
+          ANDROID_HOME=/usr/local/lib/android/sdk
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          cd /tmp
+          wget -q "https://dl.google.com/android/repository/commandlinetools-linux-${SDK_VERSION}_latest.zip" -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          # Accept licenses
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          # Install platform, build-tools, NDK
+          sdkmanager "platforms;android-30" "build-tools;34.0.0" "ndk;27.0.12077973" >/dev/null
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
 
       - name: Configure CMake (ARMv8.0 baseline - SAFE for Cortex-A75)
         run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
           cmake -B build-android \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
@@ -60,6 +72,7 @@ jobs:
 
       - name: Build (static)
         run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
           cmake --build build-android --config Release --target llama-cli llama-bench -j$(nproc)
 
       - name: Verify no illegal instructions (objdump)
@@ -74,6 +87,7 @@ jobs:
 
       - name: Package static binaries + libs
         run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
           mkdir -p out-static
           cp build-android/bin/llama-cli build-android/bin/llama-bench out-static/
           for lib in libggml.so libggml-base.so libggml-cpu.so libllama.so; do
@@ -101,15 +115,24 @@ jobs:
           ref: master
           submodules: recursive
 
-      - name: Setup Android SDK + NDK
-        uses: android-actions/setup-android@v3
-        with:
-          api-level: 30
-          ndk-version: r27c
-          cmdline-tools-version: latest
+      - name: Install Android SDK + NDK (manual)
+        run: |
+          SDK_VERSION=11076708
+          ANDROID_HOME=/usr/local/lib/android/sdk
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          cd /tmp
+          wget -q "https://dl.google.com/android/repository/commandlinetools-linux-${SDK_VERSION}_latest.zip" -O cmdline-tools.zip
+          unzip -q cmdline-tools.zip -d "$ANDROID_HOME/cmdline-tools"
+          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-30" "build-tools;34.0.0" "ndk;27.0.12077973" >/dev/null
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> $GITHUB_ENV
 
       - name: Configure CMake (ARMv8.0 baseline)
         run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
           cmake -B build-android \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
@@ -129,7 +152,9 @@ jobs:
             -DLLAMA_BUILD_TESTS=OFF
 
       - name: Build llama-cli only
-        run: cmake --build build-android --config Release --target llama-cli -j$(nproc)
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
+          cmake --build build-android --config Release --target llama-cli -j$(nproc)
 
       - name: Verify no illegal instructions
         run: |
